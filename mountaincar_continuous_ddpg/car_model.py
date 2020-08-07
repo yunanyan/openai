@@ -58,7 +58,7 @@ class ReplayBuffer(object):
 
 class Actor(object):
     def __init__(self, lr, n_actions, name, input_dims, sess, fc1_dims,
-                 fc2_dims, action_bound, batch_size=64, chkpt_dir='./ddpg'):
+                 fc2_dims, action_bound, batch_size=64, chkpt_dir='./ddpg/mountain_car'):
         self.lr = lr
         self.n_actions = n_actions
         self.name = name
@@ -116,6 +116,7 @@ class Actor(object):
         return self.sess.run(self.mu, feed_dict={self.input: inputs})
 
     def train(self, inputs, gradients):
+        
         self.sess.run(self.optimize,
                       feed_dict={self.input: inputs,
                                  self.action_gradient: gradients})
@@ -271,19 +272,16 @@ class Agent(object):
         mu = self.actor.predict(state) # returns list of list
         noise = self.noise()
         mu_prime = np.clip(mu + self.e*noise,low, high)
-        if self.e > 0.001:
-            self.e = self.e*0.99
 
+        # here should decay the e, but not decaying it seems have a better performance
         return mu_prime[0]
 
     def learn(self):
         if self.memory.mem_cntr < self.batch_size:
             return
-        state, action, reward, new_state, done = \
-                                      self.memory.sample_buffer(self.batch_size)
+        state, action, reward, new_state, done = self.memory.sample_buffer(self.batch_size)
 
-        critic_value_ = self.target_critic.predict(new_state,
-                                           self.target_actor.predict(new_state))
+        critic_value_ = self.target_critic.predict(new_state,self.target_actor.predict(new_state))
         target = []
         for j in range(self.batch_size):
             target.append(reward[j] + self.gamma*critic_value_[j]*done[j])
@@ -293,6 +291,7 @@ class Agent(object):
 
         a_outs = self.actor.predict(state)
         grads = self.critic.get_action_gradients(state, a_outs)
+        
 
         self.actor.train(state, grads[0])
 
