@@ -2,6 +2,7 @@ import os
 import numpy as np
 import tensorflow as tf
 from tensorflow.initializers import random_uniform
+from collections import OrderedDict
 
 class OUActionNoise(object):
     def __init__(self, mu, sigma=0.3, theta=.2, x0=None):
@@ -57,16 +58,17 @@ class ReplayBuffer(object):
         return states, actions, rewards, states_, terminal
 
 class Actor(object):
-    def __init__(self, lr, n_actions, name, input_dims, sess, fc1_dims,
-                 fc2_dims, action_bound, batch_size=64, chkpt_dir='./ddpg'):
+    def __init__(self, lr, n_actions, name, input_dims, sess, units,
+                 f_dense, f_output ,action_bound, batch_size=64, chkpt_dir='./ddpg'):
         self.lr = lr
         self.n_actions = n_actions
         self.name = name
-        self.fc1_dims = fc1_dims
-        self.fc2_dims = fc2_dims
+        self.units = units
         self.chkpt_dir = chkpt_dir
         self.input_dims = input_dims
         self.batch_size = batch_size
+        self.f_dense = f_dense
+        self.f_output = f_output
         self.sess = sess
         self.action_bound = action_bound
         self.build_network()
@@ -92,31 +94,27 @@ class Actor(object):
             self.action_gradient = tf.placeholder(tf.float32,
                                           shape=[None, self.n_actions],
                                           name='gradients')
+            x = self.input
 
-            f1 = 1. / np.sqrt(self.fc1_dims)
-            dense1 = tf.layers.dense(self.input, units=self.fc1_dims,
-                                     kernel_initializer=random_uniform(-f1, f1),
-                                     bias_initializer=random_uniform(-f1, f1))
-            batch1 = tf.layers.batch_normalization(dense1)
-            layer1_activation = tf.nn.relu(batch1)
-            f2 = 1. / np.sqrt(self.fc2_dims)
-            dense2 = tf.layers.dense(layer1_activation, units=self.fc2_dims,
-                                     kernel_initializer=random_uniform(-f2, f2),
-                                     bias_initializer=random_uniform(-f2, f2))
-            batch2 = tf.layers.batch_normalization(dense2)
-            layer2_activation = tf.nn.relu(batch2)
-            f3 = 0.003
-            mu = tf.layers.dense(layer2_activation, units=self.n_actions,
+            
+            for unit in range(len(self.units)):
+                x = tf.layers.dense(x, units=self.units[unit],
+                                     kernel_initializer=random_uniform(-self.f_dense, self.f_dense),
+                                     bias_initializer=random_uniform(-self.f_dense, self.f_dense))
+                x = tf.layers.batch_normalization(x)
+                x = tf.nn.relu(x)
+
+           
+            mu = tf.layers.dense(x, units=self.n_actions,
                             activation='tanh',
-                            kernel_initializer= random_uniform(-f3, f3),
-                            bias_initializer=random_uniform(-f3, f3))
+                            kernel_initializer= random_uniform(-self.f_output, self.f_output),
+                            bias_initializer=random_uniform(-self.f_output, self.f_output))
             self.mu = tf.multiply(mu, self.action_bound)
 
     def predict(self, inputs):
         return self.sess.run(self.mu, feed_dict={self.input: inputs})
 
     def train(self, inputs, gradients):
-        
         self.sess.run(self.optimize,
                       feed_dict={self.input: inputs,
                                  self.action_gradient: gradients})
@@ -130,15 +128,17 @@ class Actor(object):
         self.saver.save(self.sess, self.checkpoint_file)
 
 class Critic(object):
-    def __init__(self, lr, n_actions, name, input_dims, sess, fc1_dims, fc2_dims,
+    def __init__(self, lr, n_actions, name, input_dims, sess, units,f_dense, f_output, regularizer,
                  batch_size=64, chkpt_dir='./ddpg'):
         self.lr = lr
         self.n_actions = n_actions
         self.name = name
-        self.fc1_dims = fc1_dims
-        self.fc2_dims = fc2_dims
+        self.units = units
         self.chkpt_dir = chkpt_dir
         self.input_dims = input_dims
+        self.f_dense = f_dense
+        self.f_output = f_output
+        self.regularizer = regularizer
         self.batch_size = batch_size
         self.sess = sess
         self.build_network()
@@ -164,29 +164,34 @@ class Critic(object):
                                            shape=[None,1],
                                            name='targets')
 
-            f1 = 1. / np.sqrt(self.fc1_dims)
-            dense1 = tf.layers.dense(self.input, units=self.fc1_dims,
-                                     kernel_initializer=random_uniform(-f1, f1),
-                                     bias_initializer=random_uniform(-f1, f1))
-            batch1 = tf.layers.batch_normalization(dense1)
-            layer1_activation = tf.nn.relu(batch1)
 
-            f2 = 1. / np.sqrt(self.fc2_dims)
-            dense2 = tf.layers.dense(layer1_activation, units=self.fc2_dims,
-                                     kernel_initializer=random_uniform(-f2, f2),
-                                     bias_initializer=random_uniform(-f2, f2))
-            batch2 = tf.layers.batch_normalization(dense2)
+            y = self.input
+            for unit in range(len(self.units)-1):
+                y = tf.layers.dense(self.input, units=self.units[unit],
+                                     kernel_initializer=random_uniform(-self.f_dense, self.f_dense),
+                                     bias_initializer=random_uniform(-self.f_dense, self.f_dense))
 
-            action_in = tf.layers.dense(self.actions, units=self.fc2_dims,
+                y = tf.layers.batch_normalization(y)
+                y = tf.nn.relu(y)
+
+            
+
+            layer_before_action = tf.layers.dense(y, units=self.units[0],
+                                     kernel_initializer=random_uniform(-self.f_dense, self.f_dense),
+                                     bias_initializer=random_uniform(-self.f_dense, self.f_dense))
+            batch_final = tf.layers.batch_normalization(layer_before_action)
+
+            action_in = tf.layers.dense(self.actions, units=self.units[0],
                                         activation='relu')
-            state_actions = tf.add(batch2, action_in)
+            state_actions = tf.add(batch_final, action_in)
             state_actions = tf.nn.relu(state_actions)
 
-            f3 = 0.003
+            f3 = self.f_output
+            regularizer = self.regularizer
             self.q = tf.layers.dense(state_actions, units=1,
                                kernel_initializer=random_uniform(-f3, f3),
                                bias_initializer=random_uniform(-f3, f3),
-                               kernel_regularizer=tf.keras.regularizers.l2(0.01))
+                               kernel_regularizer=tf.keras.regularizers.l2(regularizer))
 
             self.loss = tf.losses.mean_squared_error(self.q_target, self.q)
 
@@ -212,26 +217,32 @@ class Critic(object):
         print("...Saving checkpoint...")
         self.saver.save(self.sess, self.checkpoint_file)
 
-class Agent(object):
-    def __init__(self, alpha, beta, input_dims, tau, env, gamma=0.99, n_actions=2,
-                 max_size=1000000, layer1_size=400, layer2_size=300,
-                 batch_size=64, e = 0.9):
+class Agent():
+    def __init__(self, alpha, beta, input_dims, tau, env, n_actions,
+                 e, e_decay , e_min ,units, f_dense, f_output, regularizer,
+                 max_size=1000000, layer1_size=400, layer2_size=300,gamma=0.99,
+                 batch_size=64):
+
         self.gamma = gamma
         self.tau = tau
         self.e = e
+        self.e_decay = e_decay
+        self.e_min = e_min
         self.memory = ReplayBuffer(max_size, input_dims, n_actions)
         self.batch_size = batch_size
         self.sess = tf.Session()
-        self.actor = Actor(alpha, n_actions, 'Actor', input_dims, self.sess,
-                           layer1_size, layer2_size, env.action_space.high)
+        
+        self.actor = Actor(alpha, n_actions, 'Actor', input_dims, self.sess, units,
+                            f_dense, f_output, env.action_space.high)
+        
         self.critic = Critic(beta, n_actions, 'Critic', input_dims,self.sess,
-                             layer1_size, layer2_size)
+                             units,layer2_size, f_dense, f_output,regularizer)
 
         self.target_actor = Actor(alpha, n_actions, 'TargetActor',
-                                  input_dims, self.sess, layer1_size,
-                                  layer2_size, env.action_space.high)
+                                  input_dims, self.sess, units, f_dense, f_output, env.action_space.high)
+        
         self.target_critic = Critic(beta, n_actions, 'TargetCritic', input_dims,
-                                    self.sess, layer1_size, layer2_size)
+                                    self.sess, units, f_dense, f_output,regularizer)
 
         self.noise = OUActionNoise(mu=np.zeros(n_actions))
   
@@ -272,7 +283,7 @@ class Agent(object):
         mu = self.actor.predict(state) # returns list of list
         noise = self.noise()
         mu_prime = np.clip(mu + self.e*noise,low, high)
-
+        
 
         return mu_prime[0]
 
@@ -293,7 +304,6 @@ class Agent(object):
 
         a_outs = self.actor.predict(state)
         grads = self.critic.get_action_gradients(state, a_outs)
-        
 
         self.actor.train(state, grads[0])
 
