@@ -458,7 +458,7 @@ class PhilDDPG(object):
                     if i == self.hyperparamDict['maxTimeStep']-1:
                         totalrewards.append(rewards)
                         totalreward.append(rewards)
-                        print('episode: ',episode,'reward:',rewards,'runstep',agent.runstep)
+                        print('episode: ',episode,'reward:',rewards,'runstep',agent.runtime)
 
             episodereward.append(np.mean(totalrewards))
             print('epireward',np.mean(totalrewards))
