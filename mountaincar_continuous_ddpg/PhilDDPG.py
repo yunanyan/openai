@@ -466,7 +466,7 @@ class PhilDDPG(object):
                 break
             
         agent.save_models()
-        saveToPickle(score_history, self.fixedParameters['rewardSavePathPhil'])
+        saveToPickle(score_history, self.hyperparamDict['rewardSavePathPhil'])
         return score_history
     
 
