@@ -433,7 +433,8 @@ class PhilDDPG(object):
 
         path = self.hyperparamDict['modelSavePathPhil']
         )
-
+        
+        meanreward = []
         totalreward = []
         totalrewards = []
         episodereward = []
