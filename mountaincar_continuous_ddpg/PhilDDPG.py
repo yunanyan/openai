@@ -298,7 +298,7 @@ class Agent(object):
         mu = self.actor.predict(state) # returns list of list
         noise = self.noise(self.runtime)
         mu_prime = np.clip(mu + noise,low, high)
-        self.runtime +=1
+        
 
         return mu_prime[0]
 
@@ -434,46 +434,48 @@ class PhilDDPG(object):
         path = self.hyperparamDict['modelSavePathPhil']
         )
         
-        meanreward = []
-        totalreward = []
-        totalrewards = []
-        episodereward = []
+        episodeRewardList = []
+        meanEpsRewardList = []
         
     
         for episode in range(1,self.hyperparamDict['maxEpisode']+1):
             obs = env.reset()
-            rewards = 0
+            epsReward = 0
             
             for i in range(self.hyperparamDict['maxTimeStep']):
                 done = False
                
               
-                while not done:
-                    #env.render()
-                    act = agent.choose_action(obs,env.action_space.low, env.action_space.high)
-                    new_state, reward, done, info = env.step(act)
-                    agent.remember(obs, act, reward, new_state, int(done))
-                    agent.learn()
-                    rewards += reward
-                    obs = new_state
-                    if i == self.hyperparamDict['maxTimeStep']-1:
-                        totalrewards.append(rewards)
-                        totalreward.append(rewards)
-                        print('episode: ',episode,'reward:',rewards,'runstep',agent.runtime)
+               
+                #env.render()
+                act = agent.choose_action(obs,env.action_space.low, env.action_space.high)
+                new_state, reward, done, info = env.step(act)
+                agent.remember(obs, act, reward, new_state, int(done))
+                agent.learn()
+                epsReward += reward
+                obs = new_state
 
-            episodereward.append(np.mean(totalrewards))
-            print('epireward',np.mean(totalrewards))
-            if episode % 100 == 0:
-                meanreward.append(np.mean(totalreward))
-                print('episode: ',episode,'meanreward:',np.mean(totalreward))
-                totalreward = []
+                agent.runtime +=1
+
+                if done:
+                    break
+                
+
+            episodeRewardList.append(epsReward)
+            meanEpsRewardList.append(np.mean(episodeRewardList))
+            last100EpsMeanReward = np.mean(episodeRewardList[-100: ])
+
+            
+            if episode % 1 == 0:
+                print('episode: {}, last 100eps mean reward: {}, last eps reward: {} with {} steps'.format(episode,
+                                                                                                            last100EpsMeanReward, epsReward, agent.runtime))
                     
                     
 
                 
             
         agent.save_models()
-        saveToPickle(meanreward, self.hyperparamDict['rewardSavePathPhil'])
-        return episodereward
+        saveToPickle(meanEpsRewardList, self.hyperparamDict['rewardSavePathPhil'])
+        return meanEpsRewardList
     
 
