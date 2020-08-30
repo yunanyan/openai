@@ -90,6 +90,7 @@ class Actor(object):
     def build_network(self):
         with tf.variable_scope(self.name):
             self.input = tf.placeholder(tf.float32,
+
                                         shape=[None, *self.input_dims],
                                         name='inputs')
 
@@ -302,6 +303,11 @@ class Agent(object):
 
         return mu_prime[0]
 
+    def choose_test_action(self,state,low,high):
+        state = state[np.newaxis, :]
+        mu = self.actor.predict(state) # returns list of list
+        return mu[0]
+
     def learn(self):
         if self.memory.mem_cntr < self.batch_size:
             return
@@ -336,8 +342,8 @@ class Agent(object):
     def load_models(self):
         self.actor.load_checkpoint()
         self.target_actor.load_checkpoint() 
-        self.critic.save_checkpoint()
-        self.target_critic.save_checkpoint()
+        self.critic.load_checkpoint()
+        self.target_critic.load_checkpoint()
 
 def env_norm(env):
     '''Normalize states (observations) and actions to [-1, 1]'''
@@ -477,5 +483,68 @@ class PhilDDPG(object):
         agent.save_models()
         saveToPickle(meanEpsRewardList, self.hyperparamDict['rewardSavePathPhil'])
         return meanEpsRewardList
+
+
+def getModelEvalResult(env, hyperparamDict, numTrajToSample = 10):
+    trajectoryreward = []
+    totalrewards = []
+    agent = Agent(
+        alpha = hyperparamDict['actorLR'],
+        beta = hyperparamDict['criticLR'],
+        input_dims = [env.observation_space.shape[0]],
+        tau = hyperparamDict['tau'],
+        env = env_norm(env) if hyperparamDict['normalizeEnv'] else env,
+        n_actions = env.action_space.shape[0],
+        units1 = hyperparamDict['actorHiddenLayersWidths'],
+        units2 = hyperparamDict['criticHiddenLayersWidths'],
+
+        actoractivationfunction = hyperparamDict['actorActivFunction'],
+        actorHiddenLayersWeightInit = hyperparamDict['actorHiddenLayersWeightInit'],
+        actorHiddenLayersBiasInit = hyperparamDict['actorHiddenLayersBiasInit'],
+        actorOutputWeightInit = hyperparamDict['actorOutputWeightInit'],
+        actorOutputBiasInit = hyperparamDict['actorOutputBiasInit'],
+        
+        criticHiddenLayersWidths = hyperparamDict['criticHiddenLayersWidths'],
+        criticActivFunction = hyperparamDict['criticActivFunction'],
+        criticHiddenLayersBiasInit = hyperparamDict['criticHiddenLayersBiasInit'],
+        criticHiddenLayersWeightInit = hyperparamDict['criticHiddenLayersWeightInit'],
+        criticOutputWeightInit = hyperparamDict['criticOutputWeightInit'],
+        criticOutputBiasInit = hyperparamDict['criticOutputBiasInit'],
+
+        max_size = hyperparamDict['bufferSize'],
+        gamma = hyperparamDict['gamma'],
+        batch_size = hyperparamDict['minibatchSize'],
+        initnoisevar = hyperparamDict['noiseInitVariance'],
+        noiseDecay = hyperparamDict['varianceDiscount'],
+        noiseDacayStep = hyperparamDict['noiseDecayStartStep'],
+        minVar = hyperparamDict['minVar'],
+
+        path = hyperparamDict['modelSavePathPhil']
+        )
+    
+    agent.load_models()
+
+    for i in range(numTrajToSample):
+        obs = env.reset()
+        rewards = 0
+        for j in range(hyperparamDict['maxTimeStep']):
+            done = False
+            
+            act = agent.choose_test_action(obs,env.action_space.low, env.action_space.high)
+            new_state, reward, done, info = env.step(act)
+            rewards += reward
+            obs = new_state
+
+            if done:
+                trajectoryreward.append(rewards)
+                break
+            
+    meanTrajReward = np.mean(trajectoryreward)
+    seTrajReward = np.std(trajectoryreward) / np.sqrt(len(trajectoryreward)-1)
+    print(meanTrajReward)
+    print(seTrajReward)
+    return meanTrajReward, seTrajReward
+            
+    
     
 
